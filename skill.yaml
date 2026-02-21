@@ -1,0 +1,148 @@
+# OpenPAVE Dropbox Skill
+# Access Dropbox files, folders, and Paper documents
+
+name: dropbox
+version: 1.0.0
+description: Access Dropbox files, folders, and Paper documents. List, search, read, create, and share files.
+
+# Execution pattern
+pattern: sandbox
+entrypoint: index.js
+
+# Available commands
+commands:
+  - name: account
+    description: Get current Dropbox account info
+    args: []
+    options:
+      - --summary
+      - --json
+
+  - name: ls
+    description: List folder contents
+    args:
+      - "[path]"
+    options:
+      - --summary
+      - --json
+      - -r, --recursive
+      - -n, --limit <number>
+
+  - name: search
+    description: Search files and folders by name
+    args:
+      - <query>
+    options:
+      - --summary
+      - --json
+      - -n, --max <number>
+      - -p, --path <path>
+      - -e, --ext <extensions>
+
+  - name: paper
+    description: List Paper documents in a folder
+    args:
+      - "[path]"
+    options:
+      - --summary
+      - --json
+
+  - name: paper-search
+    description: Search Paper documents by content
+    args:
+      - <query>
+    options:
+      - --summary
+      - --json
+      - -n, --max <number>
+
+  - name: read
+    description: Read Paper document content as markdown
+    args:
+      - <path>
+    options:
+      - -f, --format <format>
+
+  - name: paper-create
+    description: Create a new Paper document
+    args:
+      - <path>
+    options:
+      - --summary
+      - --json
+      - -c, --content <text>
+      - -i, --input <file>
+      - -f, --format <format>
+
+  - name: paper-update
+    description: Update an existing Paper document
+    args:
+      - <path>
+    options:
+      - --summary
+      - --json
+      - -c, --content <text>
+      - -i, --input <file>
+      - -f, --format <format>
+      - --policy <policy>
+
+  - name: info
+    description: Get file or folder metadata
+    args:
+      - <path>
+    options:
+      - --summary
+      - --json
+
+  - name: link
+    description: Get or create a shared link for a file
+    args:
+      - <path>
+    options:
+      - --summary
+
+  - name: download
+    description: Download a file
+    args:
+      - <path>
+    options:
+      - -o, --output <file>
+
+# Token configuration for secure sandbox access
+tokens:
+  dropbox:
+    type: oauth
+    description: Dropbox OAuth access token
+    domains:
+      - api.dropboxapi.com
+      - content.dropboxapi.com
+    env:
+      required:
+        - DROPBOX_REFRESH_TOKEN
+        - DROPBOX_APP_KEY
+        - DROPBOX_APP_SECRET
+    config:
+      env: DROPBOX_TOKEN
+      type: oauth
+      domains:
+        - api.dropboxapi.com
+        - content.dropboxapi.com
+      placement:
+        type: header
+        name: Authorization
+        format: "Bearer {token}"
+      refreshEnv: DROPBOX_REFRESH_TOKEN
+      refreshUrl: https://api.dropboxapi.com/oauth2/token
+      clientIdEnv: DROPBOX_APP_KEY
+      clientSecretEnv: DROPBOX_APP_SECRET
+
+# Sandbox permissions
+permissions:
+  network:
+    - api.dropboxapi.com
+    - content.dropboxapi.com
+  filesystem:
+    read:
+      - "*"
+    write:
+      - "tmp/*"
