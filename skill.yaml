@@ -1,60 +1,99 @@
 # OpenPAVE Dropbox Skill
-# Access Dropbox files, folders, and Paper documents
+# Access Dropbox files, folders, and Paper documents with secure token handling
 
 name: dropbox
 version: 1.0.0
-description: Access Dropbox files, folders, and Paper documents. List, search, read, create, and share files.
+description: Access Dropbox files, folders, and Paper documents. Use --input for multi-line content in Paper docs.
+
+author:
+  name: cnrai
+  url: https://github.com/cnrai
+
+license: MIT
+homepage: https://github.com/cnrai/openpave-dropbox
+repository: cnrai/openpave-dropbox
 
 # Execution pattern
 pattern: sandbox
 entrypoint: index.js
 
+# LLM Usage Instructions
+usage_notes: |
+  IMPORTANT FOR AI AGENTS:
+  
+  Paper Document Creation:
+  - For SHORT/SINGLE-LINE content: Use --content parameter
+  - For MULTI-LINE content: ALWAYS use --input with a file due to shell argument limitations
+  - Multi-line --content will be truncated at first newline
+  
+  Examples:
+  - Short: paper-create "/path/doc.paper" --content "Single line text"
+  - Multi-line: 
+    1. Write content to file: write /tmp/content.md "# Title\n\nMulti-line content"
+    2. Use file: paper-create "/path/doc.paper" --input /tmp/content.md
+  
+  Common Paths:
+  - HR documents: "/CnR HR/"
+  - Management: "/CnR Management/"
+  - General: "/CnR/"
+
 # Available commands
 commands:
   - name: account
     description: Get current Dropbox account info
-    args: []
     options:
-      - --summary
       - --json
+      - --summary
 
   - name: ls
     description: List folder contents
     args:
       - "[path]"
     options:
-      - --summary
       - --json
+      - --summary
       - -r, --recursive
       - -n, --limit <number>
+    examples:
+      - 'ls "/CnR HR" --summary'
+      - 'ls --recursive --limit 50'
 
   - name: search
     description: Search files and folders by name
     args:
       - <query>
     options:
-      - --summary
       - --json
+      - --summary
       - -n, --max <number>
       - -p, --path <path>
       - -e, --ext <extensions>
+    examples:
+      - 'search "evaluation" --summary'
+      - 'search "report" --path "/CnR HR" --max 10'
 
   - name: paper
     description: List Paper documents in a folder
     args:
       - "[path]"
     options:
-      - --summary
       - --json
+      - --summary
+    examples:
+      - 'paper "/CnR HR" --summary'
+      - 'paper --summary'
 
   - name: paper-search
     description: Search Paper documents by content
     args:
       - <query>
     options:
-      - --summary
       - --json
+      - --summary
       - -n, --max <number>
+    examples:
+      - 'paper-search "performance review" --summary'
+      - 'paper-search "vesper" --max 5'
 
   - name: read
     description: Read Paper document content as markdown
@@ -62,37 +101,58 @@ commands:
       - <path>
     options:
       - -f, --format <format>
+    examples:
+      - 'read "/CnR HR/Employee Handbook.paper"'
+      - 'read "/path/doc.paper" --format markdown'
 
   - name: paper-create
-    description: Create a new Paper document
+    description: Create a new Paper document (USE --input for multi-line content)
     args:
       - <path>
     options:
-      - --summary
-      - --json
       - -c, --content <text>
       - -i, --input <file>
       - -f, --format <format>
+      - --json
+      - --summary
+    usage_warning: "CRITICAL: Use --input for multi-line content. --content truncates at first newline!"
+    examples:
+      - 'paper-create "/CnR HR/Test.paper" --content "Single line only"'
+      - 'paper-create "/CnR HR/Report.paper" --input /tmp/report.md --summary'
+    best_practices:
+      - "For any content with newlines, headers, tables: ALWAYS use --input with a file"
+      - "Save content to /tmp/filename.md first, then use --input parameter"
+      - "Shell arguments cannot handle complex multi-line markdown properly"
 
   - name: paper-update
-    description: Update an existing Paper document
+    description: Update an existing Paper document (USE --input for multi-line content)
     args:
       - <path>
     options:
-      - --summary
-      - --json
       - -c, --content <text>
       - -i, --input <file>
       - -f, --format <format>
       - --policy <policy>
+      - --json
+      - --summary
+    usage_warning: "CRITICAL: Use --input for multi-line content. --content truncates at first newline!"
+    examples:
+      - 'paper-update "/CnR HR/Doc.paper" --input /tmp/updated.md --policy update'
+      - 'paper-update "/path/doc.paper" --content "Single line update"'
+    policies:
+      - "update: Append to existing content"
+      - "overwrite: Replace all content (default)"
 
   - name: info
     description: Get file or folder metadata
     args:
       - <path>
     options:
-      - --summary
       - --json
+      - --summary
+    examples:
+      - 'info "/CnR HR/document.paper" --summary'
+      - 'info "/CnR" --json'
 
   - name: link
     description: Get or create a shared link for a file
@@ -100,6 +160,8 @@ commands:
       - <path>
     options:
       - --summary
+    examples:
+      - 'link "/CnR HR/document.paper"'
 
   - name: download
     description: Download a file
@@ -107,6 +169,8 @@ commands:
       - <path>
     options:
       - -o, --output <file>
+    examples:
+      - 'download "/CnR/report.pdf" --output /tmp/report.pdf'
 
 # Token configuration for secure sandbox access
 tokens:
