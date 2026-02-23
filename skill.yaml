@@ -2,7 +2,7 @@
 # Access Dropbox files, folders, and Paper documents with secure token handling
 
 name: dropbox
-version: 1.0.0
+version: 1.1.0
 description: Access Dropbox files, folders, and Paper documents. Use --input for multi-line content in Paper docs.
 
 author:
