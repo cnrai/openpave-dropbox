@@ -4,6 +4,7 @@
 name: dropbox
 version: 1.2.0
 description: Access Dropbox files, folders, and Paper documents. Use --input for multi-line content in Paper docs.
+category: productivity
 
 author:
   name: cnrai
