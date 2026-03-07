@@ -11,6 +11,133 @@ var fs = require('fs');
 var path = require('path');
 
 /**
+ * Convert markdown to HTML suitable for Dropbox Paper API import.
+ * 
+ * The Dropbox Paper API's markdown parser is limited - it collapses
+ * blank lines between paragraphs and merges numbered list content.
+ * Converting to HTML with explicit <p> tags and &nbsp; spacers
+ * preserves the intended formatting.
+ */
+function markdownToDropboxHtml(md) {
+  var lines = md.split('\n');
+  var html = [];
+  var inList = false;
+  var i = 0;
+  
+  while (i < lines.length) {
+    var line = lines[i];
+    var trimmed = line.replace(/^\s+/, '');
+    
+    // Empty line - add spacer paragraph
+    if (trimmed === '') {
+      // Don't add spacer at very beginning or end
+      if (html.length > 0 && i < lines.length - 1) {
+        html.push('<p>&nbsp;</p>');
+      }
+      i++;
+      continue;
+    }
+    
+    // Heading lines: # ## ### etc
+    var headingMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
+    if (headingMatch) {
+      var level = headingMatch[1].length;
+      html.push('<h' + level + '>' + escapeHtml(headingMatch[2]) + '</h' + level + '>');
+      i++;
+      continue;
+    }
+    
+    // Image: ![alt](url)
+    var imgMatch = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (imgMatch) {
+      html.push('<p><img src="' + escapeHtml(imgMatch[2]) + '" alt="' + escapeHtml(imgMatch[1]) + '" /></p>');
+      i++;
+      continue;
+    }
+    
+    // Horizontal rule: --- or ***  or ___
+    if (trimmed.match(/^[-*_]{3,}$/)) {
+      html.push('<hr />');
+      i++;
+      continue;
+    }
+    
+    // Ordered list item: "1. Text" or "    1. Text" (sub-item)
+    var olMatch = line.match(/^(\s*)(\d+)\.\s+(.*)$/);
+    if (olMatch) {
+      var indent = olMatch[1].length;
+      var text = olMatch[3];
+      // Main list items (no indent) - render as bold numbered paragraph
+      // Sub-list items (indented) - render with indent
+      if (indent >= 4) {
+        // Sub-item under a list item - indent with nbsp
+        var indentStr = '';
+        for (var s = 0; s < indent; s++) indentStr += '&nbsp;';
+        html.push('<p>' + indentStr + olMatch[2] + '. ' + escapeHtml(text) + '</p>');
+      } else {
+        html.push('<p>' + olMatch[2] + '. ' + escapeHtml(text) + '</p>');
+      }
+      i++;
+      continue;
+    }
+    
+    // Unordered list item: "- Text" or "* Text"
+    var ulMatch = line.match(/^(\s*)[-*]\s+(.*)$/);
+    if (ulMatch) {
+      var ulIndent = ulMatch[1].length;
+      var ulText = ulMatch[2];
+      var ulIndentStr = '';
+      for (var u = 0; u < ulIndent; u++) ulIndentStr += '&nbsp;';
+      html.push('<p>' + ulIndentStr + '- ' + escapeHtml(ulText) + '</p>');
+      i++;
+      continue;
+    }
+    
+    // Indented content (4+ spaces) - preserve indentation with nbsp
+    var indentedMatch = line.match(/^(\s{4,})(.*)$/);
+    if (indentedMatch) {
+      var spaces = indentedMatch[1].length;
+      var indentContent = indentedMatch[2];
+      var nbspIndent = '';
+      for (var n = 0; n < spaces; n++) nbspIndent += '&nbsp;';
+      html.push('<p>' + nbspIndent + escapeHtml(indentContent) + '</p>');
+      i++;
+      continue;
+    }
+    
+    // Bold text: **text**
+    // Regular paragraph
+    var paragraphText = escapeHtml(trimmed);
+    // Process inline formatting
+    paragraphText = paragraphText.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+    paragraphText = paragraphText.replace(/\*([^*]+)\*/g, '<i>$1</i>');
+    paragraphText = paragraphText.replace(/__([^_]+)__/g, '<b>$1</b>');
+    paragraphText = paragraphText.replace(/_([^_]+)_/g, '<i>$1</i>');
+    
+    // Preserve leading whitespace for non-indented but spaced lines
+    var leadingSpaces = line.match(/^(\s*)/)[1].length;
+    if (leadingSpaces > 0 && leadingSpaces < 4) {
+      var spaceStr = '';
+      for (var sp = 0; sp < leadingSpaces; sp++) spaceStr += '&nbsp;';
+      html.push('<p>' + spaceStr + paragraphText + '</p>');
+    } else {
+      html.push('<p>' + paragraphText + '</p>');
+    }
+    i++;
+  }
+  
+  return html.join('\n');
+}
+
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/**
  * Safe nested property access (replaces optional chaining)
  */
 function safeGet(obj, path, defaultVal) {
@@ -307,13 +434,25 @@ DropboxClient.prototype.searchPaperDocs = function(query, options) {
  * Create a new Paper document
  * Note: Creating Paper docs in shared folders may fail with invalid_file_extension
  * In that case, we create at root and move to the target location
+ * 
+ * When import_format is 'markdown', we auto-convert to HTML to work around
+ * the Dropbox Paper API's limited markdown parser (which collapses blank lines
+ * and merges numbered list content).
  */
 DropboxClient.prototype.createPaperDoc = function(docPath, content, importFormat) {
+  // Auto-convert markdown to HTML for better formatting preservation
+  var actualContent = content;
+  var actualFormat = importFormat || 'markdown';
+  if (actualFormat === 'markdown') {
+    actualContent = markdownToDropboxHtml(content);
+    actualFormat = 'html';
+  }
+  
   try {
     return this.uploadRequest('/files/paper/create', {
       path: docPath,
-      import_format: importFormat || 'markdown'
-    }, content);
+      import_format: actualFormat
+    }, actualContent);
   } catch (err) {
     // If failed with invalid_file_extension, try create at root then move
     if (err.data && err.data.error && err.data.error['.tag'] === 'invalid_file_extension') {
@@ -325,8 +464,8 @@ DropboxClient.prototype.createPaperDoc = function(docPath, content, importFormat
       // Create at root
       var result = this.uploadRequest('/files/paper/create', {
         path: tempPath,
-        import_format: importFormat || 'markdown'
-      }, content);
+        import_format: actualFormat
+      }, actualContent);
       
       // Move to target location
       var actualPath = result.result_path || tempPath;
@@ -349,11 +488,22 @@ DropboxClient.prototype.createPaperDoc = function(docPath, content, importFormat
 /**
  * Update an existing Paper document
  * For 'update' policy (append), we need to provide the current paper_revision
+ * 
+ * When import_format is 'markdown', we auto-convert to HTML to work around
+ * the Dropbox Paper API's limited markdown parser.
  */
 DropboxClient.prototype.updatePaperDoc = function(docPath, content, importFormat, updatePolicy) {
+  // Auto-convert markdown to HTML for better formatting preservation
+  var actualContent = content;
+  var actualFormat = importFormat || 'markdown';
+  if (actualFormat === 'markdown') {
+    actualContent = markdownToDropboxHtml(content);
+    actualFormat = 'html';
+  }
+  
   var apiArg = {
     path: docPath,
-    import_format: importFormat || 'markdown',
+    import_format: actualFormat,
     doc_update_policy: updatePolicy || 'overwrite'
   };
   
@@ -367,7 +517,7 @@ DropboxClient.prototype.updatePaperDoc = function(docPath, content, importFormat
     // In practice, 'overwrite' is more commonly used
   }
   
-  return this.uploadRequest('/files/paper/update', apiArg, content);
+  return this.uploadRequest('/files/paper/update', apiArg, actualContent);
 };
 
 /**
