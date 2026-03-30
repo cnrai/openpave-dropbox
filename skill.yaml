@@ -173,6 +173,19 @@ commands:
     examples:
       - 'download "/CnR/report.pdf" --output /tmp/report.pdf'
 
+  - name: upload
+    description: Upload a local file to Dropbox
+    args:
+      - <localPath>
+      - <dropboxPath>
+    options:
+      - --mode <mode>
+      - --json
+      - --summary
+    examples:
+      - 'upload /tmp/diagram.svg "/CnR/diagram.svg"'
+      - 'upload /tmp/report.pdf "/CnR/Reports/report.pdf" --summary'
+
 # Token configuration for secure sandbox access
 tokens:
   dropbox:

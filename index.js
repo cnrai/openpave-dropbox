@@ -293,7 +293,7 @@ DropboxClient.prototype.downloadRequest = function(endpoint, apiArg) {
  * Make a content upload request
  */
 DropboxClient.prototype.uploadRequest = function(endpoint, apiArg, content) {
-  var url = this.apiUrl + endpoint;
+  var url = this.contentUrl + endpoint;
   
   var response = this.authenticatedRequest(url, {
     method: 'POST',
@@ -389,6 +389,19 @@ DropboxClient.prototype.getMetadata = function(filePath) {
     path: filePath,
     include_media_info: true
   });
+};
+
+/**
+ * Upload a local file to Dropbox
+ */
+DropboxClient.prototype.uploadFile = function(localPath, dropboxPath, mode) {
+  var content = fs.readFileSync(localPath);
+  return this.uploadRequest('/files/upload', {
+    path: dropboxPath,
+    mode: mode || 'overwrite',
+    autorename: false,
+    mute: false
+  }, content);
 };
 
 /**
@@ -974,6 +987,32 @@ function main() {
           console.log('Saved to ' + outputFile);
         } else {
           console.log(downloadContent);
+        }
+        break;
+      
+      case 'upload':
+        var localFile = parsed.positional[0];
+        var remotePath = parsed.positional[1];
+        if (!localFile || !remotePath) {
+          console.error('Error: Local file path and Dropbox destination path required');
+          console.error('Usage: dropbox upload <localPath> <dropboxPath>');
+          process.exit(1);
+        }
+        if (!fs.existsSync(localFile)) {
+          console.error('Error: Local file not found: ' + localFile);
+          process.exit(1);
+        }
+        var uploadMode = parsed.options.mode || 'overwrite';
+        var uploadResult = client.uploadFile(localFile, remotePath, uploadMode);
+        if (parsed.options.json) {
+          console.log(JSON.stringify(uploadResult, null, 2));
+        } else if (parsed.options.summary) {
+          console.log('Uploaded to ' + uploadResult.path_display + ' (' + uploadResult.size + ' bytes)');
+        } else {
+          console.log('⬆️  Uploaded: ' + uploadResult.name);
+          console.log('📂 Path: ' + uploadResult.path_display);
+          console.log('📏 Size: ' + uploadResult.size + ' bytes');
+          console.log('🆔 ID: ' + uploadResult.id);
         }
         break;
       
