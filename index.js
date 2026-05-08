@@ -61,6 +61,85 @@ function markdownToDropboxHtml(md) {
       i++;
       continue;
     }
+
+    // Markdown table:
+    //   | h1 | h2 |
+    //   |----|----|
+    //   | a  | b  |
+    if (trimmed.charAt(0) === '|' && i + 1 < lines.length) {
+      var sepLine = lines[i + 1].replace(/^\s+/, '');
+      var sepRe = /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
+      if (sepRe.test(sepLine)) {
+        var splitRow = function(row) {
+          var s = row.replace(/^\s*\|/, '').replace(/\|\s*$/, '');
+          return s.split('|').map(function(c) { return c.replace(/^\s+|\s+$/g, ''); });
+        };
+        var renderCell = function(text) {
+          var t = escapeHtml(text);
+          t = t.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+          t = t.replace(/\*([^*]+)\*/g, '<i>$1</i>');
+          t = t.replace(/__([^_]+)__/g, '<b>$1</b>');
+          t = t.replace(/_([^_]+)_/g, '<i>$1</i>');
+          return t;
+        };
+        var headers = splitRow(trimmed);
+        i += 2; // skip header + separator
+        var rows = [];
+        while (i < lines.length) {
+          var rowLine = lines[i].replace(/^\s+/, '');
+          if (rowLine.charAt(0) !== '|') break;
+          rows.push(splitRow(rowLine));
+          i++;
+        }
+        // Emit Dropbox Paper "native" editable table markup.
+        // Key structure (reverse-engineered from existing Paper docs):
+        //   <div style="width:100%;overflow:auto;">
+        //     <table style="width:100%;border-spacing:0;border:1px solid #c1c7cd;word-break:break-word;">
+        //       <tbody>
+        //         <tr>
+        //           <td style="...per-side border widths...">
+        //             <div dir="auto" style="line-height:26px;" class="ace-line "><span>cell</span></div>
+        //           </td>
+        //         </tr>
+        //       </tbody>
+        //     </table>
+        //   </div>
+        // Border rules: first row TD top=0; all TDs bottom=0, right=0; first col TD left=0, others left=1;
+        // non-first row TDs top=1.
+        var tdStyle = function(rowIdx, colIdx) {
+          var top = rowIdx === 0 ? 0 : 1;
+          var left = colIdx === 0 ? 0 : 1;
+          return 'border-color: #c1c7cd;border-style: solid;'
+            + 'border-top-width: ' + top + ';'
+            + 'border-bottom-width: 0;'
+            + 'border-right-width: 0;'
+            + 'border-left-width: ' + left + ';'
+            + 'min-width: 50px;min-height: 20px;padding: 5px 8px;'
+            + 'word-break: normal;vertical-align: top;';
+        };
+        var wrapCell = function(text) {
+          return '<div dir="auto" style="line-height: 26px;" class="ace-line "><span>'
+            + renderCell(text) + '</span></div>';
+        };
+        var allRows = [headers].concat(rows);
+        var tbl = ['<div style="width: 100%; overflow: auto;">'];
+        tbl.push('<table style="width: 100%;border-spacing: 0;border: 1px solid #c1c7cd;word-break: break-word;">');
+        tbl.push('<tbody>');
+        for (var rr = 0; rr < allRows.length; rr++) {
+          tbl.push('<tr>');
+          for (var cc = 0; cc < allRows[rr].length; cc++) {
+            // Bold the entire header row
+            var cellText = allRows[rr][cc];
+            if (rr === 0 && cellText.length > 0) cellText = '**' + cellText.replace(/\*\*/g, '') + '**';
+            tbl.push('<td style="' + tdStyle(rr, cc) + '">' + wrapCell(cellText) + '</td>');
+          }
+          tbl.push('</tr>');
+        }
+        tbl.push('</tbody></table></div>');
+        html.push(tbl.join(''));
+        continue;
+      }
+    }
     
     // Ordered list item: "1. Text" or "    1. Text" (sub-item)
     var olMatch = line.match(/^(\s*)(\d+)\.\s+(.*)$/);
