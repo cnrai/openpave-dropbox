@@ -461,8 +461,33 @@ DropboxClient.prototype.createPaperDoc = function(docPath, content, importFormat
     actualFormat = 'html';
   }
   
+  var self = this;
+  function paperUpload(apiArg, body) {
+    // /files/paper/create lives on api.dropboxapi.com (not content host)
+    var url = self.apiUrl + '/files/paper/create';
+    var response = self.authenticatedRequest(url, {
+      method: 'POST',
+      headers: {
+        'Dropbox-API-Arg': JSON.stringify(apiArg),
+        'Content-Type': 'application/octet-stream'
+      },
+      body: body,
+      timeout: self.timeout
+    });
+    var text = response.text();
+    var data;
+    try { data = JSON.parse(text); } catch (e) { data = { error: text }; }
+    if (!response.ok) {
+      var err = new Error(data.error_summary || safeGet(data, 'error.message', null) || text || 'Upload failed');
+      err.status = response.status;
+      err.data = data;
+      throw err;
+    }
+    return data;
+  }
+  
   try {
-    return this.uploadRequest('/files/paper/create', {
+    return paperUpload({
       path: docPath,
       import_format: actualFormat
     }, actualContent);
@@ -475,7 +500,7 @@ DropboxClient.prototype.createPaperDoc = function(docPath, content, importFormat
       var tempPath = '/' + filename;
       
       // Create at root
-      var result = this.uploadRequest('/files/paper/create', {
+      var result = paperUpload({
         path: tempPath,
         import_format: actualFormat
       }, actualContent);
@@ -530,7 +555,27 @@ DropboxClient.prototype.updatePaperDoc = function(docPath, content, importFormat
     // In practice, 'overwrite' is more commonly used
   }
   
-  return this.uploadRequest('/files/paper/update', apiArg, actualContent);
+  // /files/paper/update lives on api.dropboxapi.com (not content host)
+  var url = this.apiUrl + '/files/paper/update';
+  var response = this.authenticatedRequest(url, {
+    method: 'POST',
+    headers: {
+      'Dropbox-API-Arg': JSON.stringify(apiArg),
+      'Content-Type': 'application/octet-stream'
+    },
+    body: actualContent,
+    timeout: this.timeout
+  });
+  var text = response.text();
+  var data;
+  try { data = JSON.parse(text); } catch (e) { data = { error: text }; }
+  if (!response.ok) {
+    var err = new Error(data.error_summary || safeGet(data, 'error.message', null) || text || 'Upload failed');
+    err.status = response.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
 };
 
 /**
