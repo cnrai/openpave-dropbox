@@ -4,6 +4,27 @@
 
 ## ⚠️ **CRITICAL USAGE NOTE FOR AI AGENTS**
 
+### Paper Document Formatting Rules
+
+These rules apply to **every** Paper document you create or update. They are not optional.
+
+**1. Never duplicate the title.** Paper uses the filename as the document title — do NOT start your markdown content with a `# Title` line. Starting with `# Title` creates a duplicated H1 in the rendered doc.
+
+**2. Use numbered headings.** All headings must use a numeric outline. The number is part of the heading text, not a markdown list:
+
+```markdown
+# 1 Section
+## 1.1 Subsection
+### 1.1.1 Sub-subsection
+# 2 Next section
+```
+
+This is the house style for every Paper doc unless the user explicitly says otherwise.
+
+**3. Read before you update.** Before calling `paper-update`, fetch the current doc with `paper-read` and match its existing heading hierarchy. Don't blow away structure the user established.
+
+**4. Spacing between subsections.** Markdown blank lines get collapsed by Paper's renderer. To create visual separation between subsections, put `&nbsp;` on its own line between them.
+
 ### Paper Document Creation - Multi-line Content Issue
 
 When creating Paper documents with multi-line content (headers, paragraphs, tables, etc.):
