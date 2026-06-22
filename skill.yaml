@@ -2,7 +2,7 @@
 # Access Dropbox files, folders, and Paper documents with secure token handling
 
 name: dropbox
-version: 1.4.0
+version: 1.5.0
 description: Access Dropbox files, folders, and Paper documents. Use --input for multi-line content in Paper docs.
 category: productivity
 
@@ -43,7 +43,6 @@ commands:
   - name: account
     description: Get current Dropbox account info
     options:
-      - --json
       - --summary
 
   - name: ls
@@ -51,7 +50,6 @@ commands:
     args:
       - "[path]"
     options:
-      - --json
       - --summary
       - -r, --recursive
       - -n, --limit <number>
@@ -64,7 +62,6 @@ commands:
     args:
       - <query>
     options:
-      - --json
       - --summary
       - -n, --max <number>
       - -p, --path <path>
@@ -78,7 +75,6 @@ commands:
     args:
       - "[path]"
     options:
-      - --json
       - --summary
     examples:
       - 'paper "/CnR HR" --summary'
@@ -89,7 +85,6 @@ commands:
     args:
       - <query>
     options:
-      - --json
       - --summary
       - -n, --max <number>
     examples:
@@ -114,7 +109,6 @@ commands:
       - -c, --content <text>
       - -i, --input <file>
       - -f, --format <format>
-      - --json
       - --summary
     usage_warning: "CRITICAL: Use --input for multi-line content. --content truncates at first newline!"
     examples:
@@ -134,7 +128,6 @@ commands:
       - -i, --input <file>
       - -f, --format <format>
       - --policy <policy>
-      - --json
       - --summary
     usage_warning: "CRITICAL: Use --input for multi-line content. --content truncates at first newline!"
     examples:
@@ -149,11 +142,9 @@ commands:
     args:
       - <path>
     options:
-      - --json
       - --summary
     examples:
       - 'info "/CnR HR/document.paper" --summary'
-      - 'info "/CnR" --json'
 
   - name: link
     description: Get or create a shared link for a file
@@ -180,7 +171,6 @@ commands:
       - <dropboxPath>
     options:
       - --mode <mode>
-      - --json
       - --summary
     examples:
       - 'upload /tmp/diagram.svg "/CnR/diagram.svg"'
