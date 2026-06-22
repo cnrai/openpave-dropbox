@@ -61,6 +61,85 @@ function markdownToDropboxHtml(md) {
       i++;
       continue;
     }
+
+    // Markdown table:
+    //   | h1 | h2 |
+    //   |----|----|
+    //   | a  | b  |
+    if (trimmed.charAt(0) === '|' && i + 1 < lines.length) {
+      var sepLine = lines[i + 1].replace(/^\s+/, '');
+      var sepRe = /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
+      if (sepRe.test(sepLine)) {
+        var splitRow = function(row) {
+          var s = row.replace(/^\s*\|/, '').replace(/\|\s*$/, '');
+          return s.split('|').map(function(c) { return c.replace(/^\s+|\s+$/g, ''); });
+        };
+        var renderCell = function(text) {
+          var t = escapeHtml(text);
+          t = t.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+          t = t.replace(/\*([^*]+)\*/g, '<i>$1</i>');
+          t = t.replace(/__([^_]+)__/g, '<b>$1</b>');
+          t = t.replace(/_([^_]+)_/g, '<i>$1</i>');
+          return t;
+        };
+        var headers = splitRow(trimmed);
+        i += 2; // skip header + separator
+        var rows = [];
+        while (i < lines.length) {
+          var rowLine = lines[i].replace(/^\s+/, '');
+          if (rowLine.charAt(0) !== '|') break;
+          rows.push(splitRow(rowLine));
+          i++;
+        }
+        // Emit Dropbox Paper "native" editable table markup.
+        // Key structure (reverse-engineered from existing Paper docs):
+        //   <div style="width:100%;overflow:auto;">
+        //     <table style="width:100%;border-spacing:0;border:1px solid #c1c7cd;word-break:break-word;">
+        //       <tbody>
+        //         <tr>
+        //           <td style="...per-side border widths...">
+        //             <div dir="auto" style="line-height:26px;" class="ace-line "><span>cell</span></div>
+        //           </td>
+        //         </tr>
+        //       </tbody>
+        //     </table>
+        //   </div>
+        // Border rules: first row TD top=0; all TDs bottom=0, right=0; first col TD left=0, others left=1;
+        // non-first row TDs top=1.
+        var tdStyle = function(rowIdx, colIdx) {
+          var top = rowIdx === 0 ? 0 : 1;
+          var left = colIdx === 0 ? 0 : 1;
+          return 'border-color: #c1c7cd;border-style: solid;'
+            + 'border-top-width: ' + top + ';'
+            + 'border-bottom-width: 0;'
+            + 'border-right-width: 0;'
+            + 'border-left-width: ' + left + ';'
+            + 'min-width: 50px;min-height: 20px;padding: 5px 8px;'
+            + 'word-break: normal;vertical-align: top;';
+        };
+        var wrapCell = function(text) {
+          return '<div dir="auto" style="line-height: 26px;" class="ace-line "><span>'
+            + renderCell(text) + '</span></div>';
+        };
+        var allRows = [headers].concat(rows);
+        var tbl = ['<div style="width: 100%; overflow: auto;">'];
+        tbl.push('<table style="width: 100%;border-spacing: 0;border: 1px solid #c1c7cd;word-break: break-word;">');
+        tbl.push('<tbody>');
+        for (var rr = 0; rr < allRows.length; rr++) {
+          tbl.push('<tr>');
+          for (var cc = 0; cc < allRows[rr].length; cc++) {
+            // Bold the entire header row
+            var cellText = allRows[rr][cc];
+            if (rr === 0 && cellText.length > 0) cellText = '**' + cellText.replace(/\*\*/g, '') + '**';
+            tbl.push('<td style="' + tdStyle(rr, cc) + '">' + wrapCell(cellText) + '</td>');
+          }
+          tbl.push('</tr>');
+        }
+        tbl.push('</tbody></table></div>');
+        html.push(tbl.join(''));
+        continue;
+      }
+    }
     
     // Ordered list item: "1. Text" or "    1. Text" (sub-item)
     var olMatch = line.match(/^(\s*)(\d+)\.\s+(.*)$/);
@@ -259,34 +338,95 @@ DropboxClient.prototype.request = function(endpoint, body) {
 };
 
 /**
- * Make a content download request
+ * Make a content download request using a temporary link.
+ *
+ * The PAVE proxy's _domain routing for content.dropboxapi.com is unreliable
+ * (~80% failure rate). Instead, we use /files/get_temporary_link (which works
+ * reliably on the API domain) to get a short-lived direct download URL, then
+ * fetch the file content from dl.dropboxusercontent.com via the proxy.
+ *
+ * For _saveTo mode, we download to a temp file first then move it to the
+ * target path to avoid writing partial/error content to the destination.
+ *
+ * @param {string} endpoint - API endpoint (e.g. '/files/download')
+ * @param {object} apiArg - Dropbox-API-Arg value (must include 'path')
+ * @param {string} [saveTo] - If provided, save to this file path
  */
-DropboxClient.prototype.downloadRequest = function(endpoint, apiArg) {
-  var url = this.contentUrl + endpoint;
-  
-  var response = this.authenticatedRequest(url, {
-    method: 'POST',
-    headers: {
-      'Dropbox-API-Arg': JSON.stringify(apiArg)
-    },
-    timeout: this.timeout
-  });
-  
-  if (!response.ok) {
-    var text = response.text();
-    var data;
-    try {
-      data = JSON.parse(text);
-    } catch (e) {
-      data = { error: text };
-    }
-    var err = new Error(data.error_summary || 'Download failed');
-    err.status = response.status;
-    err.data = data;
-    throw err;
+DropboxClient.prototype.downloadRequest = function(endpoint, apiArg, saveTo) {
+  var filePath = apiArg && apiArg.path;
+  if (!filePath) {
+    throw new Error('Download requires a file path');
   }
-  
-  return response;
+
+  // Step 1: Get a temporary download link via the API domain (reliable)
+  var linkResult = this.request('/files/get_temporary_link', { path: filePath });
+  var downloadUrl = linkResult.link;
+
+  // Step 2: Download the file content from the temporary link
+  if (saveTo) {
+    // Save directly using curl (no proxy needed for dl.dropboxusercontent.com)
+    var tmpFile = saveTo + '.download';
+    var curlCmd = 'curl -sS -L --max-time 60 -o ' + _shellQuote(tmpFile) + ' ' + _shellQuote(downloadUrl);
+    var curlResult;
+    try {
+      curlResult = require('child_process').execSync(curlCmd, {
+        encoding: 'utf8', timeout: 65000, maxBuffer: 10 * 1024 * 1024,
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+    } catch (err) {
+      // curl may exit with non-zero on some errors but file might still exist
+    }
+
+    // Verify the downloaded file
+    if (!fs.existsSync(tmpFile)) {
+      throw new Error('Download failed: temporary file not created');
+    }
+    var stats = fs.statSync(tmpFile);
+    if (stats.size < 50) {
+      // Check if it's an HTML error page
+      var peek = fs.readFileSync(tmpFile, { encoding: 'utf8', length: 50 });
+      fs.unlinkSync(tmpFile);
+      if (peek.indexOf('<!DOCTYPE') !== -1 || peek.indexOf('<html') !== -1) {
+        throw new Error('Download failed: received HTML error page instead of file content');
+      }
+    }
+
+    // Move temp file to final destination
+    if (fs.existsSync(saveTo)) {
+      fs.unlinkSync(saveTo);
+    }
+    fs.renameSync(tmpFile, saveTo);
+
+    return { ok: true, status: 200, savedTo: saveTo,
+      headers: { get: function() { return null; } },
+      text: function() { return ''; }, json: function() { return {}; } };
+  }
+
+  // No saveTo: return content in memory
+  var memCmd = 'curl -sS -L --max-time 60 ' + _shellQuote(downloadUrl);
+  var content;
+  try {
+    content = require('child_process').execSync(memCmd, {
+      encoding: 'utf8', timeout: 65000, maxBuffer: 100 * 1024 * 1024,
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+  } catch (err) {
+    var stderr = err.stderr ? err.stderr.toString() : '';
+    throw new Error('Download failed: ' + (stderr || err.message));
+  }
+
+  // Parse the Dropbox-API-Result header from the metadata (not available in
+  // temp link approach, but we have the metadata from get_temporary_link)
+  var metadata = linkResult.metadata || {};
+  var metadataJson = JSON.stringify(metadata);
+
+  return { ok: true, status: 200,
+    headers: { get: function(name) {
+      if (name && name.toLowerCase() === 'dropbox-api-result') return metadataJson;
+      return null;
+    } },
+    text: function() { return content; },
+    json: function() { return JSON.parse(content || '{}'); } };
 };
 
 /**
@@ -406,9 +546,14 @@ DropboxClient.prototype.uploadFile = function(localPath, dropboxPath, mode) {
 
 /**
  * Download a file
+ * @param {string} filePath - Dropbox file path or ID
+ * @param {string} [saveTo] - If provided, save directly to this local path via proxy
  */
-DropboxClient.prototype.downloadFile = function(filePath) {
-  var response = this.downloadRequest('/files/download', { path: filePath });
+DropboxClient.prototype.downloadFile = function(filePath, saveTo) {
+  var response = this.downloadRequest('/files/download', { path: filePath }, saveTo);
+  if (saveTo && response.savedTo) {
+    return response.savedTo;
+  }
   return response.text();
 };
 
@@ -461,8 +606,33 @@ DropboxClient.prototype.createPaperDoc = function(docPath, content, importFormat
     actualFormat = 'html';
   }
   
+  var self = this;
+  function paperUpload(apiArg, body) {
+    // /files/paper/create lives on api.dropboxapi.com (not content host)
+    var url = self.apiUrl + '/files/paper/create';
+    var response = self.authenticatedRequest(url, {
+      method: 'POST',
+      headers: {
+        'Dropbox-API-Arg': JSON.stringify(apiArg),
+        'Content-Type': 'application/octet-stream'
+      },
+      body: body,
+      timeout: self.timeout
+    });
+    var text = response.text();
+    var data;
+    try { data = JSON.parse(text); } catch (e) { data = { error: text }; }
+    if (!response.ok) {
+      var err = new Error(data.error_summary || safeGet(data, 'error.message', null) || text || 'Upload failed');
+      err.status = response.status;
+      err.data = data;
+      throw err;
+    }
+    return data;
+  }
+  
   try {
-    return this.uploadRequest('/files/paper/create', {
+    return paperUpload({
       path: docPath,
       import_format: actualFormat
     }, actualContent);
@@ -475,7 +645,7 @@ DropboxClient.prototype.createPaperDoc = function(docPath, content, importFormat
       var tempPath = '/' + filename;
       
       // Create at root
-      var result = this.uploadRequest('/files/paper/create', {
+      var result = paperUpload({
         path: tempPath,
         import_format: actualFormat
       }, actualContent);
@@ -530,7 +700,27 @@ DropboxClient.prototype.updatePaperDoc = function(docPath, content, importFormat
     // In practice, 'overwrite' is more commonly used
   }
   
-  return this.uploadRequest('/files/paper/update', apiArg, actualContent);
+  // /files/paper/update lives on api.dropboxapi.com (not content host)
+  var url = this.apiUrl + '/files/paper/update';
+  var response = this.authenticatedRequest(url, {
+    method: 'POST',
+    headers: {
+      'Dropbox-API-Arg': JSON.stringify(apiArg),
+      'Content-Type': 'application/octet-stream'
+    },
+    body: actualContent,
+    timeout: this.timeout
+  });
+  var text = response.text();
+  var data;
+  try { data = JSON.parse(text); } catch (e) { data = { error: text }; }
+  if (!response.ok) {
+    var err = new Error(data.error_summary || safeGet(data, 'error.message', null) || text || 'Upload failed');
+    err.status = response.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
 };
 
 /**
@@ -747,6 +937,15 @@ function proxyFetch(tokenName, url, options) {
   var parsed = new URL(url);
   var proxyUrl = PAVE_PROXY_BASE.replace(/\/$/, '') + '/' + encodeURIComponent(tokenName) + parsed.pathname + parsed.search;
   proxyUrl += (proxyUrl.indexOf('?') !== -1 ? '&' : '?') + '_mode=json';
+
+  // Route to alternate domain when the URL hostname differs from the token's default domain
+  // This is required for content endpoints (e.g. content.dropboxapi.com for /files/download)
+  var defaultDomains = { dropbox: 'api.dropboxapi.com' };
+  var tokenDefault = defaultDomains[tokenName];
+  if (tokenDefault && parsed.hostname && parsed.hostname !== tokenDefault) {
+    proxyUrl += '&_domain=' + encodeURIComponent(parsed.hostname);
+  }
+
   if (options.saveTo) {
     proxyUrl += '&_saveTo=' + encodeURIComponent(options.saveTo);
   }
@@ -1067,13 +1266,13 @@ function main() {
           process.exit(1);
         }
         
-        var downloadContent = client.downloadFile(downloadPath);
-        
-        if (parsed.options.output || parsed.options.o) {
-          var outputFile = parsed.options.output || parsed.options.o;
-          fs.writeFileSync(outputFile, downloadContent);
-          console.log('Saved to ' + outputFile);
+        var outputFile = parsed.options.output || parsed.options.o;
+        if (outputFile) {
+          // Use proxy's _saveTo for efficient binary download
+          var savedTo = client.downloadFile(downloadPath, outputFile);
+          console.log('Saved to ' + savedTo);
         } else {
+          var downloadContent = client.downloadFile(downloadPath);
           console.log(downloadContent);
         }
         break;
