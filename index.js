@@ -569,13 +569,40 @@ DropboxClient.prototype.listPaperDocs = function(folderPath) {
 };
 
 /**
- * Get Paper doc content as markdown
+ * Get Paper doc content as markdown (or html).
+ * Uses /files/export on the content domain directly.
+ *
+ * NOTE: Do NOT use downloadRequest() here because it calls
+ * /files/get_temporary_link first, which returns unsupported_file
+ * for .paper files. The /files/export content endpoint is the
+ * only way to retrieve Paper document content.
  */
-DropboxClient.prototype.getPaperDocContent = function(docPath, exportFormat) {
-  var response = this.downloadRequest('/files/export', {
+DropboxClient.prototype.getPaperDocContent = function(docPath, exportFormat, saveTo) {
+  var url = this.contentUrl + '/files/export';
+  var apiArg = {
     path: docPath,
     export_format: exportFormat || 'markdown'
-  });
+  };
+  
+  var options = {
+    method: 'POST',
+    headers: {
+      'Dropbox-API-Arg': JSON.stringify(apiArg),
+      'Content-Type': 'application/octet-stream'
+    },
+    timeout: this.timeout
+  };
+  
+  if (saveTo) {
+    options.saveTo = saveTo;
+  }
+  
+  var response = this.authenticatedRequest(url, options);
+  
+  if (saveTo && response.savedTo) {
+    return response.savedTo;
+  }
+  
   return response.text();
 };
 
@@ -1267,6 +1294,19 @@ function main() {
         }
         
         var outputFile = parsed.options.output || parsed.options.o;
+        
+        // Route .paper files through /files/export instead of /files/download
+        if (downloadPath.toLowerCase().slice(-6) === '.paper') {
+          if (outputFile) {
+            var paperSavedTo = client.getPaperDocContent(downloadPath, 'markdown', outputFile);
+            console.log('Saved to ' + paperSavedTo);
+          } else {
+            var paperContent = client.getPaperDocContent(downloadPath);
+            console.log(paperContent);
+          }
+          break;
+        }
+        
         if (outputFile) {
           // Use proxy's _saveTo for efficient binary download
           var savedTo = client.downloadFile(downloadPath, outputFile);
