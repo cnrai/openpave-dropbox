@@ -2,7 +2,7 @@
 # Access Dropbox files, folders, and Paper documents with secure token handling
 
 name: dropbox
-version: 1.4.2
+version: 1.5.1
 description: Access Dropbox files, folders, and Paper documents. Use --input for multi-line content in Paper docs.
 category: productivity
 
@@ -22,10 +22,19 @@ entrypoint: index.js
 usage_notes: |
   IMPORTANT FOR AI AGENTS:
   
-  Paper Document Creation:
+  ## Paper Document Content
   - For SHORT/SINGLE-LINE content: Use --content parameter
   - For MULTI-LINE content: ALWAYS use --input with a file due to shell argument limitations
   - Multi-line --content will be truncated at first newline
+  
+  ## Paper API Gotchas
+  - Paper documents use /files/paper/create and /files/paper/update — these are
+    DIFFERENT from /files/upload. The Paper endpoints handle markdown-to-Paper
+    conversion (headings, lists, formatting) properly. Do NOT use files/upload for
+    Paper docs.
+  - Unicode characters (em dashes —, smart quotes, etc.) in file paths cause a
+    ByteString error in the Dropbox-API-Arg header. Use plain ASCII in filenames:
+    use "-" instead of "—", use straight quotes instead of smart quotes.
   
   Examples:
   - Short: paper-create "/path/doc.paper" --content "Single line text"
@@ -33,10 +42,71 @@ usage_notes: |
     1. Write content to file: write /tmp/content.md "# Title\n\nMulti-line content"
     2. Use file: paper-create "/path/doc.paper" --input /tmp/content.md
   
-  Common Paths:
-  - HR documents: "/CnR HR/"
-  - Management: "/CnR Management/"
-  - General: "/CnR/"
+  ## Paper Document Formatting Rules
+  
+  CRITICAL — follow these rules when creating or updating Paper documents:
+  
+  1. NEVER include the document title in content — Dropbox Paper uses the filename as the title automatically. Do NOT add any heading with the document name.
+  2. Use proper heading hierarchy — H1 > H2 > H3 > H4, never skip levels.
+  3. Number all sections hierarchically — 1, 1.1, 1.1.1 format.
+  4. When updating a document, do NOT repeat the document title in your response summary. Just confirm the update was made.
+  
+  Heading Structure:
+  - # H1 — Top-level sections (numbered: 1, 2, 3...)
+  - ## H2 — Subsections (numbered: 1.1, 1.2, 2.1...)
+  - ### H3 — Sub-subsections (numbered: 1.1.1, 1.1.2...)
+  
+  Example structure:
+  ```
+  **Subtitle or tagline here**
+  
+  **Date:** March 2026
+  **Prepared by:** Organization Name
+  
+  ----------
+  
+  # 1. Executive Summary
+  
+  Brief overview...
+  
+  # 2. Analysis
+  
+  ## 2.1 Current State
+  
+  Details...
+  
+  ## 2.2 Recommendations
+  
+  ### 2.2.1 Short-term Actions
+  
+  1. First action item
+  2. Second action item
+  
+  # 3. Next Steps
+  
+  | # | Action | Owner | Due |
+  |---|--------|-------|-----|
+  | 1 | Task A | Alice | Feb 7 |
+  ```
+  
+  Other guidelines:
+  - Use numbered lists for sequential steps, action items, or prioritized content
+  - Use bullet points for non-sequential lists or features
+  - Use tables for structured comparisons or data
+  - Always add a blank line between sections and subsections
+  - Use ---------- (horizontal rules) to separate major sections
+  
+  ## Format Conversion
+  
+  The skill automatically converts markdown to Dropbox Paper-native HTML:
+  - Tables are rendered as editable Paper tables with proper borders
+  - Headings become Paper heading blocks
+  - Horizontal rules become Paper separators
+  - Images are embedded inline
+  - Bold, italic, and inline formatting is preserved
+  - Blank lines between sections become spacer paragraphs
+  
+  Write in markdown — the conversion happens automatically.
 
 # Available commands
 commands:
