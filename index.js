@@ -171,13 +171,13 @@ DropboxClient.prototype.downloadRequest = function(endpoint, apiArg, saveTo) {
   if (saveTo) {
     // Save directly using curl (no proxy needed for dl.dropboxusercontent.com)
     var tmpFile = saveTo + '.download';
-    var curlCmd = 'curl -sS -L --max-time 60 -o ' + _shellQuote(tmpFile) + ' ' + _shellQuote(downloadUrl);
     var curlResult;
     try {
-      curlResult = require('child_process').execSync(curlCmd, {
-        encoding: 'utf8', timeout: 65000, maxBuffer: 10 * 1024 * 1024,
-        stdio: ['pipe', 'pipe', 'pipe']
-      });
+      curlResult = require('child_process').execFileSync(
+        'curl', ['-sS', '-L', '--max-time', '60', '-o', tmpFile, downloadUrl],
+        { encoding: 'utf8', timeout: 65000, maxBuffer: 10 * 1024 * 1024,
+          stdio: ['pipe', 'pipe', 'pipe'] }
+      );
     } catch (err) {
       // curl may exit with non-zero on some errors but file might still exist
     }
@@ -208,13 +208,13 @@ DropboxClient.prototype.downloadRequest = function(endpoint, apiArg, saveTo) {
   }
 
   // No saveTo: return content in memory
-  var memCmd = 'curl -sS -L --max-time 60 ' + _shellQuote(downloadUrl);
   var content;
   try {
-    content = require('child_process').execSync(memCmd, {
-      encoding: 'utf8', timeout: 65000, maxBuffer: 100 * 1024 * 1024,
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
+    content = require('child_process').execFileSync(
+      'curl', ['-sS', '-L', '--max-time', '60', downloadUrl],
+      { encoding: 'utf8', timeout: 65000, maxBuffer: 100 * 1024 * 1024,
+        stdio: ['pipe', 'pipe', 'pipe'] }
+    );
   } catch (err) {
     var stderr = err.stderr ? err.stderr.toString() : '';
     throw new Error('Download failed: ' + (stderr || err.message));
@@ -778,16 +778,12 @@ function printHelp() {
 // Direct HTTP calls to the PAVE auth proxy at /proxy/:tokenName/*path
 var PAVE_PROXY_BASE = process.env.PAVE_PROXY_URL || '';
 
-function _shellQuote(s) {
-  return "'" + String(s).replace(/'/g, "'\\''") + "'";
-}
-
 function proxyHasToken(tokenName) {
   if (!PAVE_PROXY_BASE) return false;
   try {
     var url = PAVE_PROXY_BASE.replace(/\/$/, '') + '/_tokens/' + encodeURIComponent(tokenName);
-    var out = require('child_process').execSync(
-      'curl -sS --max-time 5 ' + _shellQuote(url),
+    var out = require('child_process').execFileSync(
+      'curl', ['-sS', '--max-time', '5', url],
       { encoding: 'utf8', timeout: 8000, stdio: ['pipe', 'pipe', 'pipe'] }
     );
     var r = JSON.parse(out);
@@ -821,30 +817,30 @@ function proxyFetch(tokenName, url, options) {
 
   var method = options.method || 'GET';
   var timeout = options.timeout || 30000;
-  var cmd = 'curl -sS -X ' + method + ' --max-time ' + Math.ceil(timeout / 1000);
+  var argv = ['-sS', '-X', method, '--max-time', String(Math.ceil(timeout / 1000))];
 
   var headers = Object.assign({}, options.headers || {});
   if (options.body && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
   }
   for (var k in headers) {
-    cmd += ' -H ' + _shellQuote(k + ': ' + headers[k]);
+    argv.push('-H', k + ': ' + headers[k]);
   }
 
   if (options.bodyFile) {
     // --data-binary @file preserves the body byte-for-byte (curl -d strips
     // newlines when reading from a file) — used for Paper content uploads.
-    cmd += ' --data-binary @' + _shellQuote(options.bodyFile);
+    argv.push('--data-binary', '@' + options.bodyFile);
   } else if (options.body) {
     var bodyStr = typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
-    cmd += ' -d ' + _shellQuote(bodyStr);
+    argv.push('-d', bodyStr);
   }
 
-  cmd += ' ' + _shellQuote(proxyUrl);
+  argv.push(proxyUrl);
 
   var out;
   try {
-    out = require('child_process').execSync(cmd, {
+    out = require('child_process').execFileSync('curl', argv, {
       encoding: 'utf8', timeout: timeout + 5000, maxBuffer: 10 * 1024 * 1024,
       stdio: ['pipe', 'pipe', 'pipe']
     });
