@@ -9,6 +9,7 @@
 
 var fs = require('fs');
 var path = require('path');
+var os = require('os');
 
 /**
  * JSON.stringify for the Dropbox-API-Arg header. HTTP headers must be ASCII,
@@ -240,15 +241,24 @@ DropboxClient.prototype.downloadRequest = function(endpoint, apiArg, saveTo) {
 DropboxClient.prototype.uploadRequest = function(endpoint, apiArg, content) {
   var url = this.contentUrl + endpoint;
   
-  var response = this.authenticatedRequest(url, {
+  // content is either the raw bytes (Buffer/string) or { bodyFile: <path> } to
+  // stream straight from disk — see the BODY_ARG_LIMIT note in proxyFetch
+  // (issue #10).
+  var requestOptions = {
     method: 'POST',
     headers: {
       'Dropbox-API-Arg': httpHeaderSafeJson(apiArg),
       'Content-Type': 'application/octet-stream'
     },
-    body: content,
     timeout: this.timeout
-  });
+  };
+  if (content && content.bodyFile) {
+    requestOptions.bodyFile = content.bodyFile;
+  } else {
+    requestOptions.body = content;
+  }
+
+  var response = this.authenticatedRequest(url, requestOptions);
   
   var text = response.text();
   var data;
@@ -340,13 +350,16 @@ DropboxClient.prototype.getMetadata = function(filePath) {
  * Upload a local file to Dropbox
  */
 DropboxClient.prototype.uploadFile = function(localPath, dropboxPath, mode) {
-  var content = fs.readFileSync(localPath);
+  // Stream the file from its path (bodyFile) instead of reading it into memory.
+  // A buffered body is JSON-encoded into a single curl argument and dies with
+  // E2BIG above ~285 KB (issue #10); --data-binary @file also sends the real
+  // bytes rather than the JSON envelope a Buffer serializes to.
   return this.uploadRequest('/files/upload', {
     path: dropboxPath,
     mode: mode || 'overwrite',
     autorename: false,
     mute: false
-  }, content);
+  }, { bodyFile: localPath });
 };
 
 /**
@@ -778,6 +791,13 @@ function printHelp() {
 // Direct HTTP calls to the PAVE auth proxy at /proxy/:tokenName/*path
 var PAVE_PROXY_BASE = process.env.PAVE_PROXY_URL || '';
 
+// Request bodies must never travel in argv. execve caps a single argument at
+// MAX_ARG_STRLEN (128 KiB on Linux) and the whole argv+env at ARG_MAX (1 MB on
+// macOS), so a large body fails with E2BIG before curl even starts. Bodies
+// above this limit are spilled to a temp file and streamed with
+// --data-binary @file; smaller ones stay inline (issue #10).
+var BODY_ARG_LIMIT = 32 * 1024;
+
 function proxyHasToken(tokenName) {
   if (!PAVE_PROXY_BASE) return false;
   try {
@@ -791,6 +811,27 @@ function proxyHasToken(tokenName) {
   } catch (e) {
     return false;
   }
+}
+
+// Spill a request body to disk and stream it with --data-binary @file.
+//
+// Two runtime constraints, both verified against the real sandbox:
+//  - process.pid is undefined inside the PAVE sandbox, so the file name must not
+//    depend on it;
+//  - the sandbox refuses to unlink an absolute path with fewer than 3 path
+//    components, so /tmp/<file>.tmp can be written but NOT deleted. Files live in
+//    a dedicated subdirectory instead.
+var PROXY_BODY_DIR = path.join(os.tmpdir(), 'pave-proxy-bodies');
+function _writeProxyBodyFile(bodyStr) {
+  try { fs.mkdirSync(PROXY_BODY_DIR, { recursive: true }); } catch (e) { /* already exists */ }
+  var p = path.join(PROXY_BODY_DIR,
+    'body-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10) + '.tmp');
+  fs.writeFileSync(p, bodyStr, { mode: 384 }); // 0600
+  return p;
+}
+function _removeProxyBodyFile(p) {
+  try { fs.unlinkSync(p); return; } catch (e) { /* fall through */ }
+  try { if (typeof fs.rmSync === 'function') fs.rmSync(p, { force: true }); } catch (e) { /* best effort */ }
 }
 
 function proxyFetch(tokenName, url, options) {
@@ -827,13 +868,22 @@ function proxyFetch(tokenName, url, options) {
     argv.push('-H', k + ': ' + headers[k]);
   }
 
-  if (options.bodyFile) {
-    // --data-binary @file preserves the body byte-for-byte (curl -d strips
-    // newlines when reading from a file) — used for Paper content uploads.
-    argv.push('--data-binary', '@' + options.bodyFile);
-  } else if (options.body) {
+  var bodyFile = options.bodyFile || null;
+  var tempBodyFile = null;
+  if (!bodyFile && options.body) {
     var bodyStr = typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
-    argv.push('-d', bodyStr);
+    if (bodyStr.length > BODY_ARG_LIMIT) {
+      tempBodyFile = _writeProxyBodyFile(bodyStr);
+      bodyFile = tempBodyFile;
+    } else {
+      argv.push('-d', bodyStr);
+    }
+  }
+
+  if (bodyFile) {
+    // --data-binary @file preserves the body byte-for-byte (curl -d strips
+    // newlines when reading from a file) — used for uploads and Paper content.
+    argv.push('--data-binary', '@' + bodyFile);
   }
 
   argv.push(proxyUrl);
@@ -850,6 +900,8 @@ function proxyFetch(tokenName, url, options) {
     if (stdout) { out = stdout; } else {
       throw new Error('Proxy request failed: ' + (stderr.trim() || err.message));
     }
+  } finally {
+    if (tempBodyFile) { _removeProxyBodyFile(tempBodyFile); }
   }
 
   var resp;
