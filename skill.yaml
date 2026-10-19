@@ -2,7 +2,7 @@
 # Access Dropbox files, folders, and Paper documents with secure token handling
 
 name: dropbox
-version: 2.0.0
+version: 2.1.0
 description: Access Dropbox files, folders, and Paper documents. Use --input for multi-line content in Paper docs.
 category: productivity
 
@@ -42,11 +42,16 @@ usage_notes: |
 commands:
   - name: account
     description: Get current Dropbox account info
+    # #2343: readOnly marks commands the plan-mode gate may run. Reads only —
+    # no Dropbox state and no local file changes. Downloads/UPLOADS are NOT
+    # read-only (they touch the local filesystem).
+    readOnly: true
     options:
       - --summary
 
   - name: ls
     description: List folder contents
+    readOnly: true
     args:
       - "[path]"
     options:
@@ -59,6 +64,7 @@ commands:
 
   - name: search
     description: Search files and folders by name
+    readOnly: true
     args:
       - <query>
     options:
@@ -72,6 +78,7 @@ commands:
 
   - name: paper
     description: List Paper documents in a folder
+    readOnly: true
     args:
       - "[path]"
     options:
@@ -82,6 +89,7 @@ commands:
 
   - name: paper-search
     description: Search Paper documents by content
+    readOnly: true
     args:
       - <query>
     options:
@@ -93,6 +101,7 @@ commands:
 
   - name: read
     description: Read Paper document content as markdown
+    readOnly: true
     args:
       - <path>
     options:
@@ -103,6 +112,7 @@ commands:
 
   - name: paper-create
     description: Create a new Paper document (USE --input for multi-line content)
+    readOnly: false
     args:
       - <path>
     options:
@@ -122,6 +132,7 @@ commands:
 
   - name: paper-update
     description: Update an existing Paper document (USE --input for multi-line content)
+    readOnly: false
     args:
       - <path>
     options:
@@ -144,6 +155,7 @@ commands:
 
   - name: info
     description: Get file or folder metadata
+    readOnly: true
     args:
       - <path>
     options:
@@ -153,6 +165,8 @@ commands:
 
   - name: link
     description: Get or create a shared link for a file
+    # Creates a shared link when none exists → mutates Dropbox state.
+    readOnly: false
     args:
       - <path>
     options:
@@ -162,6 +176,8 @@ commands:
 
   - name: download
     description: Download a file
+    # Writes the file to the local filesystem → not read-only.
+    readOnly: false
     args:
       - <path>
     options:
@@ -171,6 +187,7 @@ commands:
 
   - name: upload
     description: Upload a local file to Dropbox
+    readOnly: false
     args:
       - <localPath>
       - <dropboxPath>

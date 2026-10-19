@@ -215,19 +215,25 @@ pave run dropbox download "/CnR/report.pdf" --output /tmp/report.pdf
 
 ## Commands Reference
 
-| Command | Purpose | Key Options |
-|---------|---------|-------------|
-| `account` | Get account info | `--summary` |
-| `ls [path]` | List folders/files | `--recursive`, `--limit` |
-| `search <query>` | Search by name | `--path`, `--max` |
-| `paper [path]` | List Paper docs | `--summary` |
-| `paper-search <query>` | Search Paper content | `--max` |
-| `read <path>` | Read Paper content | `--format` |
-| `paper-create <path>` | **Create Paper doc** | `--input` (recommended), `--content` |
-| `paper-update <path>` | **Update Paper doc** | `--input` (recommended), `--policy` |
-| `info <path>` | File metadata | `--summary` |
-| `link <path>` | Shared link | - |
-| `download <path>` | Download file | `--output` |
+The `Plan mode` column is the manifest `readOnly` flag. PAVE's plan-mode gate
+(`planModeAllows` in openpave-lite `tools/index.js`) allows a skill command in
+plan mode only when its manifest declares `readOnly: true` (openpave #2343), so
+read-only data access keeps working while mutating commands stay blocked.
+
+| Command | Purpose | Key Options | Plan mode |
+|---------|---------|-------------|-----------|
+| `account` | Get account info | `--summary` | read-only |
+| `ls [path]` | List folders/files | `--recursive`, `--limit` | read-only |
+| `search <query>` | Search by name | `--path`, `--max` | read-only |
+| `paper [path]` | List Paper docs | `--summary` | read-only |
+| `paper-search <query>` | Search Paper content | `--max` | read-only |
+| `read <path>` | Read Paper content | `--format` | read-only |
+| `paper-create <path>` | **Create Paper doc** | `--input` (recommended), `--content` | blocked |
+| `paper-update <path>` | **Update Paper doc** | `--input` (recommended), `--policy` | blocked |
+| `info <path>` | File metadata | `--summary` | read-only |
+| `link <path>` | Shared link (creates one if absent) | - | blocked |
+| `download <path>` | Download file (writes locally) | `--output` | blocked |
+| `upload <localPath> <dropboxPath>` | Upload a local file | `--mode` | blocked |
 
 ## Common Dropbox Folders (C&R)
 
