@@ -799,6 +799,7 @@ var PAVE_PROXY_BASE = process.env.PAVE_PROXY_URL || '';
 var BODY_ARG_LIMIT = 32 * 1024;
 
 function proxyHasToken(tokenName) {
+  if (typeof global !== 'undefined' && global.paveSkill) return global.paveSkill.hasToken(tokenName);
   if (!PAVE_PROXY_BASE) return false;
   try {
     var url = PAVE_PROXY_BASE.replace(/\/$/, '') + '/_tokens/' + encodeURIComponent(tokenName);
@@ -835,6 +836,7 @@ function _removeProxyBodyFile(p) {
 }
 
 function proxyFetch(tokenName, url, options) {
+  if (typeof global !== 'undefined' && global.paveSkill) return global.paveSkill.authenticatedFetch(tokenName, url, options);
   options = options || {};
   if (!PAVE_PROXY_BASE) {
     throw new Error('PAVE_PROXY_URL not set - cannot reach auth proxy');
